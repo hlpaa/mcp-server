@@ -1,8 +1,12 @@
 from mcp.server.mcpserver import MCPServer
+from dotenv import load_dotenv
 import psutil
 import os
 import sqlite3
 import re
+import requests
+
+load_dotenv()
 
 mcp = MCPServer("mcp-server")
 
@@ -51,7 +55,7 @@ def get_disk_usage(path: str = "/") -> dict:
      }
 
 @mcp.tool()
-def query_database(sql: str, db_path: str = "data.db") -> dict:
+def query_database(sql: str, db_path: str = "loja.db") -> dict:
      """Executa uma query SELECT em um banco SQLite e retorna as linhas."""
      if not re.match(r"^\s*SELECT", sql, re.IGNORECASE):
          return {"error": "Apenas queries SELECT são permitidas"}
@@ -65,6 +69,54 @@ def query_database(sql: str, db_path: str = "data.db") -> dict:
          return {"error": str(e)}
      finally:
          conn.close()
+
+
+@mcp.tool()                                                                                                                                                                           
+def search_github_issues(query: str, repo: str = None, max_results: int = 20) -> dict:                                                                                                      
+      """Busca issues no GitHub usando a API de search."""                                                                                                                                    
+      token = os.environ.get("GITHUB_TOKEN")                                                                                                                                                  
+      if not token:                                                                                                                                                                           
+          return {"error": "Variável de ambiente GITHUB_TOKEN não está definida"}
+
+      parts = [query]
+      if "is:issue" not in query and "is:pull-request" not in query:
+          parts.append("is:issue")
+      if repo:
+          parts.append(f"repo:{repo}")
+      q = " ".join(parts)
+
+      headers = {
+          "Authorization": f"Bearer {token}",
+          "Accept": "application/vnd.github+json",
+      }                                                                                                                                                                                       
+      params = {"q": q, "per_page": min(max_results, 100)}
+                                                                                                                                                                                              
+      try:        
+          resp = requests.get(
+              "https://api.github.com/search/issues",
+              headers=headers,
+              params=params,
+              timeout=10,
+          )
+      except requests.exceptions.RequestException as e:
+          return {"error": f"Falha na requisição: {e}"}                                                                                                                                       
+                                                                                                                                                                                              
+      if resp.status_code != 200:                                                                                                                                                             
+          return {"error": f"GitHub retornou {resp.status_code}: {resp.text}"}                                                                                                                
+                  
+      data = resp.json()
+      issues = [
+          {
+              "number": i["number"],
+              "title": i["title"],
+              "state": i["state"],
+              "labels": [l["name"] for l in i.get("labels", [])],                                                                                                                             
+              "assignee": (i.get("assignee") or {}).get("login"),                                                                                                                             
+              "url": i["html_url"],                                                                                                                                                           
+          }                                                                                                                                                                                   
+          for i in data.get("items", [])
+      ]
+      return {"issues": issues, "count": len(issues)}
 
 if __name__ == "__main__":
     mcp.run()
