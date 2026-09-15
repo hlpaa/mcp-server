@@ -1,6 +1,8 @@
 from mcp.server.mcpserver import MCPServer
 import psutil
 import os
+import sqlite3
+import re
 
 mcp = MCPServer("mcp-server")
 
@@ -47,6 +49,22 @@ def get_disk_usage(path: str = "/") -> dict:
          "free_gb":     round(free  / 1e9, 2),
          "percent_used": round(used / total * 100, 1),
      }
+
+@mcp.tool()
+def query_database(sql: str, db_path: str = "data.db") -> dict:
+     """Executa uma query SELECT em um banco SQLite e retorna as linhas."""
+     if not re.match(r"^\s*SELECT", sql, re.IGNORECASE):
+         return {"error": "Apenas queries SELECT são permitidas"}
+     try:
+         conn = sqlite3.connect(db_path)
+         conn.row_factory = sqlite3.Row
+         cursor = conn.execute(sql)
+         rows = [dict(row) for row in cursor.fetchall()]
+         return {"rows": rows, "count": len(rows)}
+     except sqlite3.Error as e:
+         return {"error": str(e)}
+     finally:
+         conn.close()
 
 if __name__ == "__main__":
     mcp.run()
